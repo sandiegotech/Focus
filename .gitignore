@@ -1,0 +1,28 @@
+# macOS
+.DS_Store
+
+# Xcode — user-specific state (keep shared schemes, ignore per-user data)
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+
+# Xcode build output
+build/
+DerivedData/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# Dependency managers (not used here, ignored for safety)
+Pods/
+Carthage/Build/
+
+# App data / misc
+*.log
