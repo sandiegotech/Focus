@@ -1,23 +1,33 @@
+<!-- SDIT Tools · Focus -->
+
 # Focus
 
-A simple, clean iOS app for showing up — press one button, watch a calm countdown
-toward your daily goal (e.g. 8h of music), build the hours up over time, and work
-toward a reward you choose. Discipline over motivation, accountability without the
-guilt trip.
+**Attention & Deep Work** — a tool from the [San Diego Institute of Technology](https://sandiegotech.org).
+
+The world is engineered to pull your attention away from what matters. Focus is an
+app to help you get it back: press one button, watch a calm countdown toward your
+daily goal, build the hours up over time, and work toward a reward you choose.
+Discipline over motivation, accountability without the guilt trip.
+
+> Part of [**SDIT Tools**](https://tools.sandiegotech.org) — free, open-source software
+> built for focus, privacy, and performance in the age of AI.
+> **Free · Open Source · MIT Licensed · No accounts, no feed, no algorithm.**
+
+Platforms: **iOS · macOS**
 
 <p>&nbsp;</p>
 
 ## ⚠️ First: you need Xcode
 
-This project is complete, but your Mac currently has only the **Command Line Tools**,
-not full **Xcode** — which is required to build and run an iOS app.
+This project is complete, but building an Apple app requires full **Xcode**, not just
+the Command Line Tools.
 
 1. Install **Xcode** (free) from the **Mac App Store**. It's a big download, so start it first.
 2. After it installs, open it once and let it finish "Installing components."
-3. (Optional, makes the command line point at Xcode):
+3. (Optional, points the command line at Xcode):
    `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`
 
-Requires **Xcode 16 or newer** (the project uses the modern synchronized‑folder format).
+Requires **Xcode 16 or newer** (the project uses the modern synchronized-folder format).
 
 <p>&nbsp;</p>
 
@@ -32,10 +42,13 @@ Requires **Xcode 16 or newer** (the project uses the modern synchronized‑folde
 1. Plug in your phone and select it in the device menu.
 2. Select the **Focus** target → **Signing & Capabilities** tab → set **Team** to your
    Apple ID (Xcode → Settings → Accounts to add it). A free Apple ID works.
-3. The bundle id is `com.brandon.focus`; if Xcode says it's taken, change it to something
-   unique like `com.yourname.focus`.
+3. The bundle id is `com.brandonnelson.focus`; if Xcode says it's taken, change it to
+   something unique like `com.yourname.focus`.
 4. Press **▶ Run**. On the phone, approve the developer profile under
    *Settings → General → VPN & Device Management* the first time.
+
+### On your Mac
+Select the **FocusMac** scheme and press **▶ Run**.
 
 <p>&nbsp;</p>
 
@@ -43,25 +56,39 @@ Requires **Xcode 16 or newer** (the project uses the modern synchronized‑folde
 
 - **Today** — One big **Start / Pause** button and a ring. Starting counts a session;
   the ring fills and the center counts **down** toward today's goal. Pause anytime —
-  your progress is saved, so 8h is chipped away across the day, never one daunting block.
-  Hit the goal and you get a little celebration.
-- **Progress** — All‑time hours, days practiced, current streak, a 7‑day chart, and your
+  your progress is saved, so the goal is chipped away across the day, never one daunting
+  block. Hit the goal and you get a little celebration.
+- **Progress** — All-time hours, days practiced, current streak, a 7-day chart, and your
   **reward** progress bar. Tap **+** to add or fix time by hand (in case you forgot to hit
   start — the app is forgiving on purpose).
 - **Settings** — Add activities (name, icon, color, daily goal) and set each one's reward
   (e.g. *"Buy that pedal" after 100 hours*). Turn on a **gentle daily reminder** with a
   time of your choosing.
 
-It ships with one starter activity — **Music, 8h/day** — so it's usable immediately.
+It ships with one starter activity so it's usable immediately.
+
+<p>&nbsp;</p>
+
+## Design
+
+Focus follows the SDIT brand: a warm paper background, deep-ink text, and a calm
+**marine** accent, with **gold** reserved for emphasis. The activity color palette and
+app icon are drawn from the same system shared across Focus, Shade, and Disko, so the
+tools feel like one suite. Brand tokens live in `Focus/Theme.swift` (`enum Brand`).
+
+| Token | Hex | Use |
+|-------|-----|-----|
+| Paper | `#FCFBF8` | Background |
+| Ink | `#101C2C` | Text / icon tile |
+| Marine | `#234E70` | Primary accent |
+| Gold | `#A8842C` | Emphasis |
 
 <p>&nbsp;</p>
 
 ## Notes
 
 - **Private & offline.** No accounts, no network. Your data is a single JSON file in the
-  app's Application Support folder, on‑device only.
-- **No app icon yet.** It runs with a placeholder. To add one: open `Assets.xcassets` →
-  `AppIcon` in Xcode and drag in a 1024×1024 image.
+  app's Application Support folder, on-device only (synced via iCloud key-value store).
 - **Make it yours.** Daily goals, rewards, colors, and the reminder are all editable in the
   app — no code changes needed.
 
@@ -70,17 +97,23 @@ It ships with one starter activity — **Music, 8h/day** — so it's usable imme
 ## Project layout
 
 ```
-Focus.xcodeproj          The Xcode project
+Focus.xcodeproj          The Xcode project (Focus + FocusMac targets)
 Focus/
   FocusApp.swift         App entry point
   Models.swift           Activity, FocusSession
   Store.swift            Data, persistence, timer logic, stats, reminders
-  Theme.swift            Colors + time formatting
+  Theme.swift            SDIT Brand tokens + colors + time formatting
   RootView.swift         The three tabs
   TodayView.swift        The timer screen (ring + countdown + button)
-  StatsView.swift        Progress: totals, chart, reward, recent sessions, add‑time
+  StatsView.swift        Progress: totals, chart, reward, recent sessions, add-time
   SettingsView.swift     Activities + reminder settings
   ActivityEditView.swift Add / edit an activity and its reward
   Components.swift       Ring, pills, stat cards, progress bar
   Assets.xcassets        App icon + accent color
 ```
+
+<p>&nbsp;</p>
+
+---
+
+© San Diego Institute of Technology · 501(c)(3) nonprofit · Released under the MIT License.

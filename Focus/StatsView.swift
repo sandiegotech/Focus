@@ -30,12 +30,15 @@ struct StatsView: View {
             }
             .navigationTitle("Progress")
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { showAddTime = true } label: {
-                        Image(systemName: "plus")
-                    }
-                    .disabled(store.selectedActivity == nil)
+                #if os(macOS)
+                ToolbarItem {
+                    addTimeButton
                 }
+                #else
+                ToolbarItem(placement: .topBarTrailing) {
+                    addTimeButton
+                }
+                #endif
             }
             .sheet(isPresented: $showAddTime) {
                 if let activity = store.selectedActivity {
@@ -58,6 +61,13 @@ struct StatsView: View {
         .pickerStyle(.segmented)
     }
 
+    private var addTimeButton: some View {
+        Button { showAddTime = true } label: {
+            Image(systemName: "plus")
+        }
+        .disabled(store.selectedActivity == nil)
+    }
+
     private func statsGrid(for activity: Activity) -> some View {
         let color = Color(hex: activity.colorHex)
         let total = store.totalSeconds(for: activity.id, asOf: now)
@@ -78,21 +88,23 @@ struct StatsView: View {
         let color = Color(hex: activity.colorHex)
 
         return VStack(alignment: .leading, spacing: 12) {
-            Text("Last 7 days").font(.headline)
+            Text("Last 7 days".uppercased())
+                .font(.sditMono(10))
+                .tracking(1.5)
+                .foregroundStyle(Color.sditGold)
             Chart {
                 ForEach(bars) { bar in
                     BarMark(
                         x: .value("Day", bar.day, unit: .day),
                         y: .value("Hours", bar.seconds / 3600)
                     )
-                    .foregroundStyle(color.gradient)
-                    .cornerRadius(6)
+                    .foregroundStyle(color)
                 }
                 RuleMark(y: .value("Goal", activity.dailyGoalHours))
                     .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
                     .foregroundStyle(.secondary)
                     .annotation(position: .top, alignment: .leading) {
-                        Text("Goal \(Format.niceHours(activity.dailyGoalHours))h")
+                        Text("Goal \(Format.hm(activity.dailyGoalSeconds))")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
@@ -105,7 +117,8 @@ struct StatsView: View {
             }
         }
         .padding(16)
-        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(.ultraThinMaterial))
+        .background(Color.sditSurface)
+        .overlay(Rectangle().stroke(Color.sditHairline, lineWidth: 1))
     }
 
     private func rewardCard(for activity: Activity) -> some View {
@@ -118,21 +131,27 @@ struct StatsView: View {
         return VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Image(systemName: reached ? "gift.fill" : "gift")
-                Text(activity.rewardName).font(.headline)
+                    .symbolRenderingMode(.monochrome)
+                Text(activity.rewardName.uppercased())
+                    .font(.sditMono(10))
+                    .tracking(1.5)
+                    .foregroundStyle(Color.sditGold)
                 Spacer()
                 if reached {
-                    Text("Unlocked!")
-                        .font(.subheadline.weight(.semibold))
+                    Text("Unlocked".uppercased())
+                        .font(.sditMono(10))
+                        .tracking(1)
                         .foregroundStyle(color)
                 }
             }
             ProgressBar(progress: progress, color: color)
             Text("\(Format.hm(total)) of \(Format.niceHours(activity.rewardTargetHours))h")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+                .font(.sditMono(11))
+                .foregroundStyle(Color.sditMuted)
         }
         .padding(16)
-        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(.ultraThinMaterial))
+        .background(Color.sditSurface)
+        .overlay(Rectangle().stroke(Color.sditHairline, lineWidth: 1))
     }
 
     private func recentSessions(for activity: Activity) -> some View {
@@ -141,7 +160,10 @@ struct StatsView: View {
             .prefix(15))
 
         return VStack(alignment: .leading, spacing: 10) {
-            Text("Recent sessions").font(.headline)
+            Text("Recent sessions".uppercased())
+                .font(.sditMono(10))
+                .tracking(1.5)
+                .foregroundStyle(Color.sditGold)
 
             if recent.isEmpty {
                 Text("No sessions yet. Press start on the Today tab, or add time with +.")
@@ -182,7 +204,8 @@ struct StatsView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(.ultraThinMaterial))
+        .background(Color.sditSurface)
+        .overlay(Rectangle().stroke(Color.sditHairline, lineWidth: 1))
     }
 }
 
@@ -211,7 +234,7 @@ struct AddTimeSheet: View {
                 }
             }
             .navigationTitle("Add time")
-            .navigationBarTitleDisplayMode(.inline)
+            .focusInlineNavigationTitle()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -228,6 +251,6 @@ struct AddTimeSheet: View {
                 }
             }
         }
-        .presentationDetents([.medium])
+        .focusMediumSheet()
     }
 }

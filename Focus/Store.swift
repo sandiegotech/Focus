@@ -34,15 +34,19 @@ final class Store {
     }
 
     var selectedActivityColor: Color {
-        Color(hex: selectedActivity?.colorHex ?? "7E6CF2")
+        Color(hex: selectedActivity?.colorHex ?? "234E70")
     }
 
     // MARK: Storage
 
     private let saveURL: URL
+    private let cloudStore = NSUbiquitousKeyValueStore.default
+    private var cloudObserver: NSObjectProtocol?
+    private var lastModified: Date = .distantPast
 
     static let reminderID = "focus.dailyReminder"
     static let goalNotificationID = "focus.goalCompletion"
+    static let cloudSnapshotKey = "focus.persisted.v1"
 
     static let defaultReminderTime: Date = {
         Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: Date()) ?? Date()
@@ -58,6 +62,7 @@ final class Store {
         self.saveURL = folder.appendingPathComponent("data.json")
 
         load()
+        migrateLegacyStarterActivityIfNeeded()
 
         // Drop a stale running session (e.g. app was killed and reopened much later)
         // so we never credit hours nobody actually worked. Short gaps resume normally.
@@ -68,6 +73,7 @@ final class Store {
 
         if activities.isEmpty { seed() }
         if selectedActivityID == nil { selectedActivityID = activities.first?.id }
+        startCloudSync()
         save()
     }
 
@@ -312,7 +318,7 @@ final class Store {
 
     // MARK: - Persistence
 
-    private struct Persisted: Codable {
+    private struct Persisted: Codable, Equatable {
         var activities: [Activity]
         var sessions: [FocusSession]
         var activeActivityID: UUID?
@@ -321,11 +327,40 @@ final class Store {
         var reminderEnabled: Bool
         var reminderHour: Int
         var reminderMinute: Int
+        var lastModified: Date?
     }
 
-    private func save() {
+    private func save(syncToICloud: Bool = true) {
+        lastModified = Date()
+        let snapshot = makeSnapshot(lastModified: lastModified)
+        save(snapshot, syncToICloud: syncToICloud)
+    }
+
+    private func save(_ snapshot: Persisted, syncToICloud: Bool = true) {
         let components = Calendar.current.dateComponents([.hour, .minute], from: reminderTime)
-        let snapshot = Persisted(
+        let refreshed = Persisted(
+            activities: snapshot.activities,
+            sessions: snapshot.sessions,
+            activeActivityID: snapshot.activeActivityID,
+            activeStart: snapshot.activeStart,
+            selectedActivityID: snapshot.selectedActivityID,
+            reminderEnabled: snapshot.reminderEnabled,
+            reminderHour: components.hour ?? snapshot.reminderHour,
+            reminderMinute: components.minute ?? snapshot.reminderMinute,
+            lastModified: snapshot.lastModified
+        )
+        do {
+            let data = try Self.encoder.encode(refreshed)
+            try data.write(to: saveURL, options: [.atomic])
+            if syncToICloud { publishToCloud(data) }
+        } catch {
+            print("Focus: save failed — \(error)")
+        }
+    }
+
+    private func makeSnapshot(lastModified: Date) -> Persisted {
+        let components = Calendar.current.dateComponents([.hour, .minute], from: reminderTime)
+        return Persisted(
             activities: activities,
             sessions: sessions,
             activeActivityID: activeActivityID,
@@ -333,14 +368,9 @@ final class Store {
             selectedActivityID: selectedActivityID,
             reminderEnabled: reminderEnabled,
             reminderHour: components.hour ?? 9,
-            reminderMinute: components.minute ?? 0
+            reminderMinute: components.minute ?? 0,
+            lastModified: lastModified
         )
-        do {
-            let data = try Self.encoder.encode(snapshot)
-            try data.write(to: saveURL, options: [.atomic])
-        } catch {
-            print("Focus: save failed — \(error)")
-        }
     }
 
     private func load() {
@@ -349,18 +379,43 @@ final class Store {
             let snapshot = try? Self.decoder.decode(Persisted.self, from: data)
         else { return }
 
+        apply(snapshot)
+        lastModified = snapshot.lastModified ?? localSaveModificationDate()
+    }
+
+    private func apply(_ snapshot: Persisted) {
         activities = snapshot.activities
         sessions = snapshot.sessions
         activeActivityID = snapshot.activeActivityID
         activeStart = snapshot.activeStart
         selectedActivityID = snapshot.selectedActivityID
         reminderEnabled = snapshot.reminderEnabled
-        reminderTime = Calendar.current.date(
-            bySettingHour: snapshot.reminderHour,
-            minute: snapshot.reminderMinute,
+        reminderTime = Self.reminderDate(hour: snapshot.reminderHour, minute: snapshot.reminderMinute)
+        lastModified = snapshot.lastModified ?? lastModified
+        normalizeSelection()
+    }
+
+    private func normalizeSelection() {
+        if selectedActivityID == nil || !activities.contains(where: { $0.id == selectedActivityID }) {
+            selectedActivityID = activities.first?.id
+        }
+        if let activeActivityID, !activities.contains(where: { $0.id == activeActivityID }) {
+            self.activeActivityID = nil
+            activeStart = nil
+        }
+    }
+
+    private static func reminderDate(hour: Int, minute: Int) -> Date {
+        Calendar.current.date(
+            bySettingHour: hour,
+            minute: minute,
             second: 0,
             of: Date()
         ) ?? Store.defaultReminderTime
+    }
+
+    private func localSaveModificationDate() -> Date {
+        (try? saveURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
     }
 
     private static let encoder: JSONEncoder = {
@@ -376,18 +431,112 @@ final class Store {
         return decoder
     }()
 
+    // MARK: - iCloud Sync
+
+    private func startCloudSync() {
+        cloudObserver = NotificationCenter.default.addObserver(
+            forName: NSUbiquitousKeyValueStore.didChangeExternallyNotification,
+            object: cloudStore,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.applyCloudSnapshotIfAvailable()
+            }
+        }
+
+        cloudStore.synchronize()
+        applyCloudSnapshotIfAvailable()
+    }
+
+    private func publishToCloud(_ data: Data) {
+        guard data.count < 900_000 else {
+            print("Focus: iCloud sync skipped because saved data is too large for key-value storage.")
+            return
+        }
+
+        cloudStore.set(data, forKey: Self.cloudSnapshotKey)
+        cloudStore.synchronize()
+    }
+
+    private func applyCloudSnapshotIfAvailable() {
+        guard
+            let data = cloudStore.data(forKey: Self.cloudSnapshotKey),
+            let remote = try? Self.decoder.decode(Persisted.self, from: data)
+        else { return }
+
+        let local = makeSnapshot(lastModified: lastModified)
+        let merged = merge(local: local, remote: remote)
+        guard !sameUserData(merged, local) else { return }
+
+        apply(merged)
+        save()
+    }
+
+    private func merge(local: Persisted, remote: Persisted) -> Persisted {
+        let localDate = local.lastModified ?? .distantPast
+        let remoteDate = remote.lastModified ?? .distantPast
+        var merged = remoteDate > localDate ? remote : local
+
+        var seenSessionIDs: Set<UUID> = []
+        merged.sessions = (local.sessions + remote.sessions)
+            .sorted { $0.start < $1.start }
+            .filter { seenSessionIDs.insert($0.id).inserted }
+
+        let validActivityIDs = Set(merged.activities.map(\.id))
+        merged.sessions.removeAll { !validActivityIDs.contains($0.activityID) }
+        if let selected = merged.selectedActivityID, !validActivityIDs.contains(selected) {
+            merged.selectedActivityID = merged.activities.first?.id
+        }
+        if let active = merged.activeActivityID, !validActivityIDs.contains(active) {
+            merged.activeActivityID = nil
+            merged.activeStart = nil
+        }
+
+        return merged
+    }
+
+    private func sameUserData(_ lhs: Persisted, _ rhs: Persisted) -> Bool {
+        lhs.activities == rhs.activities &&
+            lhs.sessions == rhs.sessions &&
+            lhs.activeActivityID == rhs.activeActivityID &&
+            lhs.activeStart == rhs.activeStart &&
+            lhs.selectedActivityID == rhs.selectedActivityID &&
+            lhs.reminderEnabled == rhs.reminderEnabled &&
+            lhs.reminderHour == rhs.reminderHour &&
+            lhs.reminderMinute == rhs.reminderMinute
+    }
+
     // MARK: - Seed
 
-    private func seed() {
-        let music = Activity(
-            name: "Music",
-            iconName: "music.note",
-            colorHex: "7E6CF2",
-            dailyGoalHours: 8,
+    private func starterActivity(id: UUID = UUID(), createdAt: Date = Date()) -> Activity {
+        Activity(
+            id: id,
+            name: "Read",
+            iconName: "book.fill",
+            colorHex: "234E70",
+            dailyGoalHours: 1,
             rewardName: "",
-            rewardTargetHours: 100
+            rewardTargetHours: 100,
+            createdAt: createdAt
         )
-        activities = [music]
-        selectedActivityID = music.id
+    }
+
+    private func migrateLegacyStarterActivityIfNeeded() {
+        guard activities.count == 1, let activity = activities.first else { return }
+        guard activity.name == "Music",
+              activity.iconName == "music.note",
+              activity.colorHex == "7E6CF2",
+              activity.dailyGoalHours == 8,
+              activity.rewardName.isEmpty,
+              activity.rewardTargetHours == 100
+        else { return }
+
+        activities[0] = starterActivity(id: activity.id, createdAt: activity.createdAt)
+    }
+
+    private func seed() {
+        let read = starterActivity()
+        activities = [read]
+        selectedActivityID = read.id
     }
 }

@@ -32,7 +32,7 @@ struct TodayView: View {
                 }
             }
             .navigationTitle("Focus")
-            .navigationBarTitleDisplayMode(.inline)
+            .focusInlineNavigationTitle()
         }
         .onReceive(ticker) { _ in
             if store.isRunning { checkGoal() }
@@ -44,8 +44,8 @@ struct TodayView: View {
                 celebratedDay = Calendar.current.startOfDay(for: Date())
             }
         }
-        .sensoryFeedback(.impact, trigger: startTrigger)
-        .sensoryFeedback(.success, trigger: successTrigger)
+        .focusImpactFeedback(trigger: startTrigger)
+        .focusSuccessFeedback(trigger: successTrigger)
         .overlay {
             if showCelebration, let activity = store.selectedActivity {
                 CelebrationOverlay(activity: activity) {
@@ -109,24 +109,30 @@ struct TodayView: View {
             VStack(spacing: 6) {
                 if reached {
                     Image(systemName: "checkmark")
-                        .font(.system(size: 46, weight: .bold))
+                        .font(.system(size: 36))
+                        .symbolRenderingMode(.monochrome)
                         .foregroundStyle(color)
                     Text("Done for today")
-                        .font(.headline)
+                        .font(.sditDisplay(22))
+                        .foregroundStyle(Color.sditInk)
                     Text("\(Format.hm(done)) logged")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .font(.sditMono(12))
+                        .tracking(0.5)
+                        .foregroundStyle(Color.sditMuted)
                 } else {
                     Text(store.isRunning ? "REMAINING" : "TO GO TODAY")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .font(.sditMono(10))
+                        .tracking(2)
+                        .foregroundStyle(Color.sditGold)
                     Text(Format.clock(remaining))
-                        .font(.system(size: 52, weight: .bold, design: .rounded))
+                        .font(.sditMono(52))
                         .monospacedDigit()
                         .contentTransition(.numericText())
-                    Text("of \(Format.niceHours(activity.dailyGoalHours))h goal")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.sditInk)
+                    Text("of \(Format.hm(activity.dailyGoalSeconds)) goal")
+                        .font(.sditMono(12))
+                        .tracking(0.5)
+                        .foregroundStyle(Color.sditMuted)
                 }
             }
             .padding(.horizontal, 40)
@@ -144,17 +150,18 @@ struct TodayView: View {
             startTrigger += 1
         } label: {
             HStack(spacing: 10) {
-                Image(systemName: running ? "pause.fill" : "play.fill")
-                Text(running ? "Pause" : "Start")
+                Image(systemName: running ? "pause" : "play")
+                    .symbolRenderingMode(.monochrome)
+                Text((running ? "Pause" : "Start").uppercased())
+                    .tracking(2)
             }
-            .font(.title3.weight(.semibold))
+            .font(.sditMono(14))
             .frame(maxWidth: .infinity)
             .padding(.vertical, 18)
-            .background(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(running ? AnyShapeStyle(Color.secondary.opacity(0.18)) : AnyShapeStyle(color.gradient))
+            .foregroundStyle(running ? Color.sditMuted : color)
+            .overlay(
+                Rectangle().stroke(running ? Color.sditHairline : color, lineWidth: 1)
             )
-            .foregroundStyle(running ? color : .white)
         }
         .buttonStyle(.plain)
     }
@@ -165,14 +172,15 @@ struct TodayView: View {
         let streak = store.currentStreak(for: activity, asOf: now)
 
         HStack(spacing: 6) {
-            Text("\(Format.hours(done)) of \(Format.niceHours(activity.dailyGoalHours)) hrs today")
+            Text("\(Format.hm(done)) of \(Format.hm(activity.dailyGoalSeconds)) today")
             if streak > 0 {
                 Text("·")
-                Text("🔥 \(streak)-day streak")
+                Text("\(streak)-day streak")
             }
         }
-        .font(.footnote)
-        .foregroundStyle(.secondary)
+        .font(.sditMono(11))
+        .tracking(0.4)
+        .foregroundStyle(Color.sditMuted)
     }
 
     // MARK: Goal detection
@@ -196,26 +204,32 @@ struct CelebrationOverlay: View {
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.4)
+            Color.sditInk.opacity(0.5)
                 .ignoresSafeArea()
                 .onTapGesture(perform: dismiss)
 
-            VStack(spacing: 16) {
-                Text("🎉").font(.system(size: 64))
-                Text("Goal complete").font(.title2.bold())
+            VStack(spacing: 20) {
+                Text("Goal complete")
+                    .font(.sditDisplay(26))
+                    .foregroundStyle(Color.sditInk)
                 Text("You gave \(Format.hm(activity.dailyGoalSeconds)) to \(activity.name) today — on discipline, not motivation. That's how it compounds.")
                     .multilineTextAlignment(.center)
-                    .foregroundStyle(.secondary)
+                    .font(.sditBody())
+                    .foregroundStyle(Color.sditMuted)
                     .padding(.horizontal)
-                Button("Nice", action: dismiss)
-                    .font(.headline)
-                    .padding(.horizontal, 32)
-                    .padding(.vertical, 12)
-                    .background(Capsule().fill(Color(hex: activity.colorHex).gradient))
-                    .foregroundStyle(.white)
+                Button(action: dismiss) {
+                    Text("Noted")
+                        .font(.sditDisplay(17, italic: true))
+                        .padding(.horizontal, 32)
+                        .padding(.vertical, 12)
+                        .foregroundStyle(Color.sditInk)
+                        .overlay(Rectangle().stroke(Color.sditInk, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
             }
             .padding(28)
-            .background(RoundedRectangle(cornerRadius: 24, style: .continuous).fill(.regularMaterial))
+            .background(Color.sditPaper)
+            .overlay(Rectangle().stroke(Color.sditHairline, lineWidth: 1))
             .padding(40)
         }
         .transition(.opacity)

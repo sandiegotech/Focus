@@ -9,7 +9,8 @@ struct ActivityEditView: View {
     @State private var name: String
     @State private var iconName: String
     @State private var colorHex: String
-    @State private var dailyGoal: Double
+    @State private var goalHours: Int
+    @State private var goalMinutes: Int
     @State private var rewardName: String
     @State private var rewardTarget: Double
 
@@ -18,17 +19,21 @@ struct ActivityEditView: View {
         _name = State(initialValue: activity?.name ?? "")
         _iconName = State(initialValue: activity?.iconName ?? "music.note")
         _colorHex = State(initialValue: activity?.colorHex ?? Self.palette[0])
-        _dailyGoal = State(initialValue: activity?.dailyGoalHours ?? 8)
+        let totalMinutes = Int(((activity?.dailyGoalHours ?? 1) * 60).rounded())
+        _goalHours = State(initialValue: totalMinutes / 60)
+        _goalMinutes = State(initialValue: totalMinutes % 60)
         _rewardName = State(initialValue: activity?.rewardName ?? "")
         _rewardTarget = State(initialValue: activity?.rewardTargetHours ?? 100)
     }
 
-    static let palette = ["7E6CF2", "EF5DA8", "F2A65A", "57C28F", "5AA9E6", "E5544B", "9B59B6", "2DD4BF"]
+    // SDIT brand palette: marine, gold, ink and calm complements — muted, timeless, never loud.
+    static let palette = Brand.activityPalette
     static let icons = ["music.note", "guitars.fill", "pencil", "book.fill", "dumbbell.fill", "paintbrush.fill",
                         "laptopcomputer", "figure.run", "camera.fill", "mic.fill", "brain.head.profile", "leaf.fill"]
 
     private var color: Color { Color(hex: colorHex) }
     private var trimmedName: String { name.trimmingCharacters(in: .whitespaces) }
+    private var goalAsHours: Double { Double(goalHours) + Double(goalMinutes) / 60 }
 
     var body: some View {
         NavigationStack {
@@ -66,9 +71,8 @@ struct ActivityEditView: View {
                 }
 
                 Section("Daily goal") {
-                    Stepper(value: $dailyGoal, in: 0.5...16, step: 0.5) {
-                        Text("\(Format.niceHours(dailyGoal)) hours per day")
-                    }
+                    Stepper(value: $goalHours, in: 0...16) { Text("\(goalHours) h") }
+                    Stepper(value: $goalMinutes, in: 0...59, step: 5) { Text("\(goalMinutes) m") }
                 }
 
                 Section {
@@ -83,13 +87,13 @@ struct ActivityEditView: View {
                 }
             }
             .navigationTitle(existing == nil ? "New activity" : "Edit activity")
-            .navigationBarTitleDisplayMode(.inline)
+            .focusInlineNavigationTitle()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save", action: save).disabled(trimmedName.isEmpty)
+                    Button("Save", action: save).disabled(trimmedName.isEmpty || goalAsHours == 0)
                 }
             }
         }
@@ -103,7 +107,7 @@ struct ActivityEditView: View {
             activity.name = trimmedName
             activity.iconName = iconName
             activity.colorHex = colorHex
-            activity.dailyGoalHours = dailyGoal
+            activity.dailyGoalHours = goalAsHours
             activity.rewardName = cleanedReward
             activity.rewardTargetHours = rewardTarget
             store.updateActivity(activity)
@@ -112,7 +116,7 @@ struct ActivityEditView: View {
                 name: trimmedName,
                 iconName: iconName,
                 colorHex: colorHex,
-                dailyGoalHours: dailyGoal,
+                dailyGoalHours: goalAsHours,
                 rewardName: cleanedReward,
                 rewardTargetHours: rewardTarget
             ))
