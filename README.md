@@ -9,11 +9,20 @@ app to help you get it back: press one button, watch a calm countdown toward you
 daily goal, build the hours up over time, and work toward a reward you choose.
 Discipline over motivation, accountability without the guilt trip.
 
-> Part of [**SDIT Tools**](https://tools.sandiegotech.org) — free, open-source software
+> Part of [**SDIT Tools**](https://sandiegotech.org/tools/) — free, open-source software
 > built for focus, privacy, and performance in the age of AI.
 > **Free · Open Source · MIT Licensed · No accounts, no feed, no algorithm.**
 
 Platforms: **iOS · macOS**
+
+## Status — in testing
+
+Focus is **currently in testing and not yet on the App Store**. The app builds and runs
+today, and TestFlight builds go out to early testers as we polish it toward release.
+If you would like to test it, write to
+[brandon@sandiegotech.org](mailto:brandon@sandiegotech.org?subject=Focus%20Testing) and
+we'll send you an invite. Blunt feedback and bug reports are the most useful
+contribution at this stage. You can also build it from source — instructions below.
 
 <p>&nbsp;</p>
 
@@ -73,7 +82,7 @@ It ships with one starter activity so it's usable immediately.
 
 Focus follows the SDIT brand: a warm paper background, deep-ink text, and a calm
 **marine** accent, with **gold** reserved for emphasis. The activity color palette and
-app icon are drawn from the same system shared across Focus, Shade, and Disko, so the
+app icon are drawn from the same system shared across Focus, Shade, and Scope, so the
 tools feel like one suite. Brand tokens live in `Focus/Theme.swift` (`enum Brand`).
 
 | Token | Hex | Use |
