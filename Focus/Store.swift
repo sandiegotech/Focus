@@ -40,13 +40,15 @@ final class Store {
     // MARK: Storage
 
     private let saveURL: URL
-    private let cloudStore = NSUbiquitousKeyValueStore.default
+    private let localURL: URL   // local fallback when iCloud is unavailable
     private var cloudObserver: NSObjectProtocol?
+    private var cloudUpdateObserver: NSObjectProtocol?
     private var lastModified: Date = .distantPast
 
     static let reminderID = "focus.dailyReminder"
     static let goalNotificationID = "focus.goalCompletion"
-    static let cloudSnapshotKey = "focus.persisted.v1"
+    static let iCloudContainerID = "iCloud.com.brandonnelson.focus"
+    static let dataFileName = "focus-data.json"
 
     static let defaultReminderTime: Date = {
         Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: Date()) ?? Date()
@@ -56,13 +58,26 @@ final class Store {
 
     init() {
         let fm = FileManager.default
-        let base = (try? fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)) ?? fm.temporaryDirectory
-        let folder = base.appendingPathComponent("Focus", isDirectory: true)
-        try? fm.createDirectory(at: folder, withIntermediateDirectories: true)
-        self.saveURL = folder.appendingPathComponent("data.json")
+
+        // Local fallback path (Application Support)
+        let appSupport = (try? fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)) ?? fm.temporaryDirectory
+        let localFolder = appSupport.appendingPathComponent("Focus", isDirectory: true)
+        try? fm.createDirectory(at: localFolder, withIntermediateDirectories: true)
+        let local = localFolder.appendingPathComponent(Self.dataFileName)
+        self.localURL = local
+
+        // Prefer iCloud Documents container; fall back to local if unavailable
+        if let icloudRoot = fm.url(forUbiquityContainerIdentifier: Self.iCloudContainerID) {
+            let docs = icloudRoot.appendingPathComponent("Documents", isDirectory: true)
+            try? fm.createDirectory(at: docs, withIntermediateDirectories: true)
+            self.saveURL = docs.appendingPathComponent(Self.dataFileName)
+        } else {
+            self.saveURL = local
+        }
 
         load()
         migrateLegacyStarterActivityIfNeeded()
+        migrateLocalToCloudIfNeeded()
 
         // Drop a stale running session (e.g. app was killed and reopened much later)
         // so we never credit hours nobody actually worked. Short gaps resume normally.
@@ -330,13 +345,9 @@ final class Store {
         var lastModified: Date?
     }
 
-    private func save(syncToICloud: Bool = true) {
+    private func save() {
         lastModified = Date()
         let snapshot = makeSnapshot(lastModified: lastModified)
-        save(snapshot, syncToICloud: syncToICloud)
-    }
-
-    private func save(_ snapshot: Persisted, syncToICloud: Bool = true) {
         let components = Calendar.current.dateComponents([.hour, .minute], from: reminderTime)
         let refreshed = Persisted(
             activities: snapshot.activities,
@@ -352,7 +363,6 @@ final class Store {
         do {
             let data = try Self.encoder.encode(refreshed)
             try data.write(to: saveURL, options: [.atomic])
-            if syncToICloud { publishToCloud(data) }
         } catch {
             print("Focus: save failed — \(error)")
         }
@@ -431,37 +441,34 @@ final class Store {
         return decoder
     }()
 
-    // MARK: - iCloud Sync
+    // MARK: - iCloud Document Sync
+    // The save file lives in the iCloud Documents container, so iCloud Drive syncs it
+    // automatically across devices. We also watch for external changes (another device
+    // wrote the file) via NSMetadataQuery, merge using last-write-wins for settings and
+    // a union strategy for sessions, then re-save locally.
 
     private func startCloudSync() {
         cloudObserver = NotificationCenter.default.addObserver(
-            forName: NSUbiquitousKeyValueStore.didChangeExternallyNotification,
-            object: cloudStore,
+            forName: NSNotification.Name.NSMetadataQueryDidFinishGathering,
+            object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in
-                self?.applyCloudSnapshotIfAvailable()
-            }
+            Task { @MainActor in self?.handleCloudFileUpdate() }
         }
 
-        cloudStore.synchronize()
-        applyCloudSnapshotIfAvailable()
-    }
-
-    private func publishToCloud(_ data: Data) {
-        guard data.count < 900_000 else {
-            print("Focus: iCloud sync skipped because saved data is too large for key-value storage.")
-            return
+        cloudUpdateObserver = NotificationCenter.default.addObserver(
+            forName: NSNotification.Name.NSMetadataQueryDidUpdate,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.handleCloudFileUpdate() }
         }
-
-        cloudStore.set(data, forKey: Self.cloudSnapshotKey)
-        cloudStore.synchronize()
     }
 
-    private func applyCloudSnapshotIfAvailable() {
-        guard
-            let data = cloudStore.data(forKey: Self.cloudSnapshotKey),
-            let remote = try? Self.decoder.decode(Persisted.self, from: data)
+    private func handleCloudFileUpdate() {
+        guard saveURL != localURL,
+              let data = try? Data(contentsOf: saveURL),
+              let remote = try? Self.decoder.decode(Persisted.self, from: data)
         else { return }
 
         let local = makeSnapshot(lastModified: lastModified)
@@ -470,6 +477,15 @@ final class Store {
 
         apply(merged)
         save()
+    }
+
+    private func migrateLocalToCloudIfNeeded() {
+        guard saveURL != localURL,
+              !FileManager.default.fileExists(atPath: saveURL.path),
+              FileManager.default.fileExists(atPath: localURL.path),
+              let data = try? Data(contentsOf: localURL)
+        else { return }
+        try? data.write(to: saveURL, options: [.atomic])
     }
 
     private func merge(local: Persisted, remote: Persisted) -> Persisted {

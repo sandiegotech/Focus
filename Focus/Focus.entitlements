@@ -4,5 +4,9 @@
 <dict>
 	<key>com.apple.developer.ubiquity-kvstore-identifier</key>
 	<string>$(TeamIdentifierPrefix)$(CFBundleIdentifier)</string>
+	<key>com.apple.developer.ubiquity-container-identifiers</key>
+	<array>
+		<string>iCloud.com.brandonnelson.focus</string>
+	</array>
 </dict>
 </plist>
