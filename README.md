@@ -15,6 +15,8 @@ Discipline over motivation, accountability without the guilt trip.
 
 Platforms: **iOS · macOS**
 
+<img src="docs/focus-iphone.png" width="270" alt="Focus on iPhone — a dark screen with a one-hour daily goal countdown and a single Start button">
+
 ## Status — in testing
 
 Focus is **currently in testing and not yet on the App Store**. The app builds and runs
