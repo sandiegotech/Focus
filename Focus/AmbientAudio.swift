@@ -11,50 +11,73 @@ import UIKit
 /// Bluetooth, the car's display. The car's play/pause maps back to starting and pausing
 /// the session, and the Now Playing scrubber doubles as a subtle progress-toward-goal bar.
 ///
-/// No CarPlay entitlement is required: any app that plays background audio and populates
-/// `MPNowPlayingInfoCenter` shows up there automatically.
-@MainActor
-final class AmbientAudio {
+/// All audio-engine work (decoding the file, activating the session, play/pause) runs on a
+/// private serial queue so the Start button updates instantly — activating an audio session
+/// on the main thread can stall for hundreds of ms, which made Start feel like it needed a
+/// couple of presses. No CarPlay entitlement is required: any app that plays background
+/// audio and populates `MPNowPlayingInfoCenter` shows up there automatically.
+final class AmbientAudio: @unchecked Sendable {
 
-    /// Called when the user taps play/pause from the car or lock screen. Wired to `Store.toggle()`.
+    /// Tapped play/pause/toggle from the car or lock screen. Wired to `Store` start/stop/toggle.
+    var onRemotePlay: (() -> Void)?
+    var onRemotePause: (() -> Void)?
     var onRemoteToggle: (() -> Void)?
 
-    private var player: AVAudioPlayer?
-    private var configured = false
+    private let queue = DispatchQueue(label: "com.brandonnelson.focus.ambient")
+    private var player: AVAudioPlayer?   // touched only on `queue`
+    private var commandsConfigured = false  // touched only on the main thread
+    private var generation = 0              // touched only on the main thread
 
-    var isPlaying: Bool { player?.isPlaying ?? false }
+    // MARK: Lifecycle
 
-    // MARK: Session control
+    /// Pre-load the player and register remote commands so the first Start has no latency.
+    /// Safe to call repeatedly. Call when sound is enabled and at launch if it's already on.
+    func prewarm() {
+        configureCommandsIfNeeded()
+        queue.async { [weak self] in self?.ensurePlayer() }
+    }
 
-    /// Begin (or resume) the ambient bed and publish Now Playing info.
+    /// Begin (or resume) the ambient bed and publish Now Playing info. Returns immediately;
+    /// the engine spins up off the main thread.
     func start(activityName: String, accentHex: String, goalSeconds: TimeInterval, doneSeconds: TimeInterval) {
-        configureIfNeeded()
-        loadPlayerIfNeeded()
-        guard let player else { return }
-
-        #if os(iOS)
-        try? AVAudioSession.sharedInstance().setActive(true)
-        #endif
-
-        if !player.isPlaying { player.play() }
+        configureCommandsIfNeeded()
+        generation &+= 1
         publishNowPlaying(activityName: activityName, accentHex: accentHex,
-                          goalSeconds: goalSeconds, doneSeconds: doneSeconds, playing: true)
+                          goalSeconds: goalSeconds, doneSeconds: doneSeconds, generation: generation)
+
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.ensurePlayer()
+            #if os(iOS)
+            let session = AVAudioSession.sharedInstance()
+            try? session.setCategory(.playback, mode: .default)
+            try? session.setActive(true)
+            #endif
+            if self.player?.isPlaying == false {
+                self.player?.currentTime = 0
+                self.player?.play()
+            }
+        }
     }
 
     /// Stop the ambient bed and clear the Now Playing slot.
     func stop() {
-        player?.pause()
-        player?.currentTime = 0
+        generation &+= 1
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
 
-        #if os(iOS)
-        try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
-        #endif
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.player?.pause()
+            self.player?.currentTime = 0
+            #if os(iOS)
+            try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
+            #endif
+        }
     }
 
-    // MARK: Setup
+    // MARK: Engine (queue-isolated)
 
-    private func loadPlayerIfNeeded() {
+    private func ensurePlayer() {
         guard player == nil,
               let url = Bundle.main.url(forResource: "Stillness", withExtension: "m4a") else { return }
         player = try? AVAudioPlayer(contentsOf: url)
@@ -62,23 +85,26 @@ final class AmbientAudio {
         player?.prepareToPlay()
     }
 
-    private func configureIfNeeded() {
-        guard !configured else { return }
-        configured = true
+    // MARK: Remote commands (main thread)
 
-        #if os(iOS)
-        let session = AVAudioSession.sharedInstance()
-        try? session.setCategory(.playback, mode: .default)
-        #endif
+    private func configureCommandsIfNeeded() {
+        guard !commandsConfigured else { return }
+        commandsConfigured = true
 
         let center = MPRemoteCommandCenter.shared()
-        let toggle: (MPRemoteCommandEvent) -> MPRemoteCommandHandlerStatus = { [weak self] _ in
-            self?.onRemoteToggle?()
+        // State-aware so a stray system play/pause can't flip the session the wrong way.
+        center.playCommand.addTarget { [weak self] _ in
+            Task { @MainActor in self?.onRemotePlay?() }
             return .success
         }
-        center.playCommand.addTarget(handler: toggle)
-        center.pauseCommand.addTarget(handler: toggle)
-        center.togglePlayPauseCommand.addTarget(handler: toggle)
+        center.pauseCommand.addTarget { [weak self] _ in
+            Task { @MainActor in self?.onRemotePause?() }
+            return .success
+        }
+        center.togglePlayPauseCommand.addTarget { [weak self] _ in
+            Task { @MainActor in self?.onRemoteToggle?() }
+            return .success
+        }
 
         // Nothing to skip or seek in an ambient bed — keep the car controls minimal.
         for command in [center.nextTrackCommand, center.previousTrackCommand,
@@ -88,15 +114,15 @@ final class AmbientAudio {
         }
     }
 
-    // MARK: Now Playing
+    // MARK: Now Playing (main thread)
 
     private func publishNowPlaying(activityName: String, accentHex: String,
-                                   goalSeconds: TimeInterval, doneSeconds: TimeInterval, playing: Bool) {
+                                   goalSeconds: TimeInterval, doneSeconds: TimeInterval, generation gen: Int) {
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: activityName,
             MPMediaItemPropertyArtist: "Focus",
             MPNowPlayingInfoPropertyIsLiveStream: false,
-            MPNowPlayingInfoPropertyPlaybackRate: playing ? 1.0 : 0.0,
+            MPNowPlayingInfoPropertyPlaybackRate: 1.0,
         ]
 
         // Map the day's progress onto the scrubber: a quiet bar that fills toward the goal.
@@ -105,17 +131,23 @@ final class AmbientAudio {
             info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = max(0, doneSeconds)
         }
 
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+
+        // Artwork rendering isn't instant, so do it after the text is up and only apply it
+        // if this session is still the current one (guards against a quick start→stop).
         #if canImport(UIKit)
-        if let art = Self.artwork(activityName: activityName, accentHex: accentHex) {
-            info[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: art.size) { _ in art }
+        Task { @MainActor in
+            guard self.generation == gen, let art = Self.artwork(activityName: activityName, accentHex: accentHex) else { return }
+            guard self.generation == gen, var current = MPNowPlayingInfoCenter.default().nowPlayingInfo else { return }
+            current[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: art.size) { _ in art }
+            MPNowPlayingInfoCenter.default().nowPlayingInfo = current
         }
         #endif
-
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
 
     #if canImport(UIKit)
     /// A calm, on-brand card for the lock screen / CarPlay artwork.
+    @MainActor
     private static func artwork(activityName: String, accentHex: String) -> UIImage? {
         let renderer = ImageRenderer(content: NowPlayingArtwork(activityName: activityName, accentHex: accentHex))
         renderer.scale = 3

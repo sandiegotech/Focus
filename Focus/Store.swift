@@ -95,8 +95,11 @@ final class Store {
         if activities.isEmpty { seed() }
         if selectedActivityID == nil { selectedActivityID = activities.first?.id }
         startCloudSync()
-        // Car / lock-screen play-pause toggles the running session.
+        // Car / lock-screen controls drive the running session.
+        ambient.onRemotePlay = { [weak self] in self?.start() }
+        ambient.onRemotePause = { [weak self] in self?.stop() }
         ambient.onRemoteToggle = { [weak self] in self?.toggle() }
+        if soundEnabled { ambient.prewarm() }
         save()
     }
 
@@ -131,6 +134,7 @@ final class Store {
     func setSound(enabled: Bool) {
         soundEnabled = enabled
         if enabled {
+            ambient.prewarm()
             if isRunning { startAmbient() }
         } else {
             ambient.stop()
