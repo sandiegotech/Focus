@@ -7,6 +7,7 @@ struct TodayView: View {
     @State private var celebratedDay: Date?
     @State private var startTrigger = 0
     @State private var successTrigger = 0
+    @State private var secondsAtGoal: TimeInterval = 0
 
     // Fires once a second to check for goal completion. The visible countdown is driven by
     // TimelineView below, so this view's body does NOT recompute every second — which keeps
@@ -48,7 +49,7 @@ struct TodayView: View {
         .focusSuccessFeedback(trigger: successTrigger)
         .overlay {
             if showCelebration, let activity = store.selectedActivity {
-                CelebrationOverlay(activity: activity) {
+                CelebrationOverlay(activity: activity, secondsDone: secondsAtGoal) {
                     withAnimation { showCelebration = false }
                 }
             }
@@ -191,6 +192,7 @@ struct TodayView: View {
         let today = Calendar.current.startOfDay(for: now)
         guard store.goalReachedToday(for: activity, asOf: now), celebratedDay != today else { return }
         celebratedDay = today
+        secondsAtGoal = store.secondsToday(for: activity.id, asOf: now)
         successTrigger += 1
         withAnimation { showCelebration = true }
     }
@@ -200,7 +202,13 @@ struct TodayView: View {
 
 struct CelebrationOverlay: View {
     let activity: Activity
+    let secondsDone: TimeInterval
     let dismiss: () -> Void
+
+    #if canImport(UIKit)
+    @State private var shareImage: UIImage?
+    @State private var showShareSheet = false
+    #endif
 
     var body: some View {
         ZStack {
@@ -212,13 +220,18 @@ struct CelebrationOverlay: View {
                 Text("Goal complete")
                     .font(.sditDisplay(26))
                     .foregroundStyle(Color.sditInk)
-                Text("You gave \(Format.hm(activity.dailyGoalSeconds)) to \(activity.name) today — on discipline, not motivation. That's how it compounds.")
+                Text("Discipline builds habits.")
+                    .multilineTextAlignment(.center)
+                    .font(.sditBody())
+                    .foregroundStyle(Color.sditInk)
+                    .padding(.horizontal)
+                Text("Still recording \(activity.name) — keep going to get ahead and reach your bigger goal sooner.")
                     .multilineTextAlignment(.center)
                     .font(.sditBody())
                     .foregroundStyle(Color.sditMuted)
                     .padding(.horizontal)
                 Button(action: dismiss) {
-                    Text("Noted")
+                    Text("Keep going")
                         .font(.sditDisplay(17, italic: true))
                         .padding(.horizontal, 32)
                         .padding(.vertical, 12)
@@ -226,6 +239,22 @@ struct CelebrationOverlay: View {
                         .overlay(Rectangle().stroke(Color.sditInk, lineWidth: 1))
                 }
                 .buttonStyle(.plain)
+
+                #if canImport(UIKit)
+                if shareImage != nil {
+                    Button { showShareSheet = true } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 11))
+                            Text("share")
+                                .font(.sditMono(11))
+                                .tracking(1.5)
+                        }
+                        .foregroundStyle(Color.sditMuted)
+                    }
+                    .buttonStyle(.plain)
+                }
+                #endif
             }
             .padding(28)
             .background(Color.sditPaper)
@@ -233,5 +262,64 @@ struct CelebrationOverlay: View {
             .padding(40)
         }
         .transition(.opacity)
+        #if canImport(UIKit)
+        .onAppear {
+            let renderer = ImageRenderer(content: ShareCard(activity: activity, secondsDone: secondsDone))
+            renderer.scale = UIScreen.main.scale
+            shareImage = renderer.uiImage
+        }
+        .sheet(isPresented: $showShareSheet) {
+            if let img = shareImage {
+                ShareSheetView(items: [img, "Put \(Format.hm(secondsDone)) into \(activity.name) today."])
+                    .ignoresSafeArea()
+            }
+        }
+        #endif
+    }
+}
+
+// MARK: - Share Sheet (UIKit bridge)
+
+#if canImport(UIKit)
+struct ShareSheetView: UIViewControllerRepresentable {
+    let items: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
+}
+#endif
+
+// MARK: - Share Card
+
+struct ShareCard: View {
+    let activity: Activity
+    let secondsDone: TimeInterval
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Spacer()
+            Text(Format.hm(secondsDone))
+                .font(.sditMono(52))
+                .foregroundStyle(Color(hex: activity.colorHex))
+            Spacer().frame(height: 10)
+            Text(activity.name)
+                .font(.sditDisplay(30))
+                .foregroundStyle(Color(hex: "FCFBF8"))
+            Spacer().frame(height: 4)
+            Text("today")
+                .font(.sditBody(15))
+                .foregroundStyle(Color(hex: "5A6472"))
+            Spacer()
+            Text("FOCUS")
+                .font(.sditMono(10))
+                .tracking(3)
+                .foregroundStyle(Color(hex: "5A6472"))
+        }
+        .padding(28)
+        .frame(width: 320, height: 320)
+        .background(Color(hex: "101C2C"))
     }
 }
