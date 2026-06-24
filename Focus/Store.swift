@@ -25,6 +25,12 @@ final class Store {
     private(set) var reminderEnabled: Bool = false
     private(set) var reminderTime: Date = Store.defaultReminderTime
 
+    /// Whether the looping ambient sound plays during a session.
+    private(set) var soundEnabled: Bool = false
+
+    /// Plays the ambient bed and drives the Now Playing / CarPlay surface. Not observable state.
+    @ObservationIgnored private let ambient = AmbientAudio()
+
     // MARK: Derived
 
     var isRunning: Bool { activeStart != nil }
@@ -89,6 +95,8 @@ final class Store {
         if activities.isEmpty { seed() }
         if selectedActivityID == nil { selectedActivityID = activities.first?.id }
         startCloudSync()
+        // Car / lock-screen play-pause toggles the running session.
+        ambient.onRemoteToggle = { [weak self] in self?.toggle() }
         save()
     }
 
@@ -99,11 +107,13 @@ final class Store {
         activeActivityID = id
         activeStart = Date()
         if reminderEnabled { scheduleGoalCompletionNotification() }
+        if soundEnabled { startAmbient() }
         save()
     }
 
     func stop() {
         UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [Store.goalNotificationID])
+        ambient.stop()
         guard let start = activeStart, let id = activeActivityID else { return }
         let elapsed = Date().timeIntervalSince(start)
         if elapsed >= 1 { // ignore accidental taps under a second
@@ -115,6 +125,29 @@ final class Store {
     }
 
     func toggle() { isRunning ? stop() : start() }
+
+    // MARK: - Ambient sound
+
+    func setSound(enabled: Bool) {
+        soundEnabled = enabled
+        if enabled {
+            if isRunning { startAmbient() }
+        } else {
+            ambient.stop()
+        }
+        save()
+    }
+
+    private func startAmbient() {
+        guard let id = activeActivityID,
+              let activity = activities.first(where: { $0.id == id }) else { return }
+        ambient.start(
+            activityName: activity.name,
+            accentHex: activity.colorHex,
+            goalSeconds: activity.dailyGoalSeconds,
+            doneSeconds: secondsToday(for: id)
+        )
+    }
 
     /// Live elapsed time of the running session as of `now`.
     func activeElapsed(asOf now: Date) -> TimeInterval {
@@ -342,6 +375,7 @@ final class Store {
         var reminderEnabled: Bool
         var reminderHour: Int
         var reminderMinute: Int
+        var soundEnabled: Bool?   // optional for backward-compatible decoding of older files
         var lastModified: Date?
     }
 
@@ -358,6 +392,7 @@ final class Store {
             reminderEnabled: snapshot.reminderEnabled,
             reminderHour: components.hour ?? snapshot.reminderHour,
             reminderMinute: components.minute ?? snapshot.reminderMinute,
+            soundEnabled: snapshot.soundEnabled,
             lastModified: snapshot.lastModified
         )
         do {
@@ -379,6 +414,7 @@ final class Store {
             reminderEnabled: reminderEnabled,
             reminderHour: components.hour ?? 9,
             reminderMinute: components.minute ?? 0,
+            soundEnabled: soundEnabled,
             lastModified: lastModified
         )
     }
@@ -401,6 +437,7 @@ final class Store {
         selectedActivityID = snapshot.selectedActivityID
         reminderEnabled = snapshot.reminderEnabled
         reminderTime = Self.reminderDate(hour: snapshot.reminderHour, minute: snapshot.reminderMinute)
+        soundEnabled = snapshot.soundEnabled ?? false
         lastModified = snapshot.lastModified ?? lastModified
         normalizeSelection()
     }
@@ -519,7 +556,8 @@ final class Store {
             lhs.selectedActivityID == rhs.selectedActivityID &&
             lhs.reminderEnabled == rhs.reminderEnabled &&
             lhs.reminderHour == rhs.reminderHour &&
-            lhs.reminderMinute == rhs.reminderMinute
+            lhs.reminderMinute == rhs.reminderMinute &&
+            (lhs.soundEnabled ?? false) == (rhs.soundEnabled ?? false)
     }
 
     // MARK: - Seed

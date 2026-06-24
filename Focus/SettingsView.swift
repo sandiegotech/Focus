@@ -56,6 +56,17 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    Toggle("Play ambient sound", isOn: Binding(
+                        get: { store.soundEnabled },
+                        set: { store.setSound(enabled: $0) }
+                    ))
+                } header: {
+                    Text("Session sound")
+                } footer: {
+                    Text("A calm, looping tone plays while a session runs. It keeps going with the screen locked and appears on the lock screen and in CarPlay, so you can start or pause from the car. Silent when off.")
+                }
+
+                Section {
                     Text("Discipline over motivation. Small, repeated effort is what compounds — show up even when you don't feel like it, and let the totals prove it to you.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
