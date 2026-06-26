@@ -5,6 +5,14 @@ struct SettingsView: View {
     @State private var editing: Activity?
     @State private var creatingNew = false
 
+    /// e.g. "Focus 1.0 (9)" — read from the bundle so it tracks each release.
+    private static var versionString: String {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "—"
+        let build = info?["CFBundleVersion"] as? String ?? "—"
+        return "Focus \(version) (\(build))"
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -72,6 +80,13 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 } header: {
                     Text("The idea")
+                } footer: {
+                    Text(Self.versionString)
+                        .font(.sditMono(11))
+                        .tracking(1)
+                        .foregroundStyle(Color.sditMuted)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.top, 8)
                 }
             }
             .navigationTitle("Settings")
